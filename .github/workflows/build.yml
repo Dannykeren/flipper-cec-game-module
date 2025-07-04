@@ -1,0 +1,146 @@
+name: Build RP2040 CEC Module Firmware
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
+    
+    - name: Setup Pico SDK
+      run: |
+        git clone --recursive https://github.com/raspberrypi/pico-sdk.git pico-sdk
+        echo "PICO_SDK_PATH=${{ github.workspace }}/pico-sdk" >> $GITHUB_ENV
+    
+    - name: Create build directory
+      run: mkdir build
+    
+    - name: Configure CMake
+      run: |
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+    
+    - name: Build firmware
+      run: |
+        cd build
+        make -j4
+    
+    - name: Prepare release files
+      run: |
+        mkdir -p release
+        cp build/flipper_cec_module.uf2 release/
+        cp README.md release/
+        cp CHANGELOG.md release/
+        
+        # Create installation instructions
+        cat > release/INSTALL.md << 'EOF'
+        # Installation Instructions
+        
+        ## Flashing the Game Module Firmware
+        
+        ### Method 1: Drag and Drop (Easiest)
+        1. Hold the BOOTSEL button on the Video Game Module
+        2. Connect the module to your computer via USB-C (while holding BOOTSEL)
+        3. The module will appear as a USB drive named "RPI-RP2"
+        4. Drag `flipper_cec_module.uf2` to the USB drive
+        5. The module will automatically reboot with the new firmware
+        
+        ### Method 2: Using Picotool
+        ```bash
+        picotool load flipper_cec_module.uf2
+        picotool reboot
+        ```
+        
+        ## Testing the Firmware
+        
+        ### USB Debug Interface
+        1. Connect the Game Module to your computer via USB-C
+        2. Open a serial terminal (PuTTY, Arduino Serial Monitor, etc.)
+        3. Connect to the COM port at 115200 baud
+        4. Type commands to test CEC functionality
+        
+        ### Available Commands:
+        - `SCAN` - Scan for CEC devices
+        - `POWER_ON` or `ON` - Send power on command
+        - `POWER_OFF` or `OFF` - Send power off command  
+        - `STATUS` - Check power status
+        - `CUSTOM:xxxx` - Send custom hex command (e.g., CUSTOM:40820100)
+        - `HELP` - Show available commands
+        - `VERSION` - Show firmware version
+        
+        ### Hardware Connections:
+        - Connect HDMI cable from Game Module to your TV
+        - Enable CEC in your TV settings (HDMI-CEC, Anynet+, BRAVIA Sync, etc.)
+        - The CEC signal goes through the HDMI connection
+        
+        ### Example Usage:
+        ```
+        > SCAN
+        RESPONSE: SCAN_RESULT:DEVICES_FOUND
+        
+        > POWER_ON
+        RESPONSE: POWER_ON:SUCCESS
+        
+        > STATUS
+        RESPONSE: STATUS:REQUEST_SENT
+        ```
+        
+        ## Troubleshooting:
+        - Make sure CEC is enabled on your TV
+        - Check HDMI cable connection
+        - Some TVs require the Game Module to be the active input
+        - LED on module should blink when sending commands
+        EOF
+    
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: flipper-cec-module-firmware-${{ github.sha }}
+        path: release/
+    
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          release/flipper_cec_module.uf2
+          release/INSTALL.md
+          release/README.md
+          release/CHANGELOG.md
+        body: |
+          ## CEC Module Firmware Release
+          
+          ### Installation:
+          1. Download `flipper_cec_module.uf2`
+          2. Hold BOOTSEL button on Game Module
+          3. Connect via USB-C while holding BOOTSEL
+          4. Drag UF2 file to the USB drive that appears
+          5. Module will reboot with new firmware
+          
+          ### Features:
+          - USB serial interface for debugging
+          - UART interface for Flipper Zero
+          - Full CEC protocol implementation
+          - Based on proven Raspberry Pi code
+          
+          ### Testing:
+          Connect via USB serial at 115200 baud and use commands like:
+          SCAN, POWER_ON, POWER_OFF, STATUS
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
